@@ -9,14 +9,9 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { Observable, map } from 'rxjs';
+import { Observable } from 'rxjs';
 import { SseService } from './sse.service';
-import type {
-  SseEvent,
-  SseConnectionRequest,
-  SseBroadcastRequest,
-  SseBroadcastDataType,
-} from './sse.service';
+import type { SseBroadcastRequest } from './sse.service';
 
 @Controller('sse')
 export class SseController {
@@ -50,8 +45,10 @@ export class SseController {
       this.logger.log(`✅ GET /sse/connect - 연결 성공: ${memberId}`);
       return stream;
     } catch (error) {
-      this.logger.error(`❌ GET /sse/connect - 연결 실패: ${error.message}`);
-      throw new BadRequestException(`SSE 연결 실패: ${error.message}`);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`❌ GET /sse/connect - 연결 실패: ${errorMessage}`);
+      throw new BadRequestException(`SSE 연결 실패: ${errorMessage}`);
     }
   }
 
@@ -95,8 +92,10 @@ export class SseController {
         message: `${sentCount}개의 연결에 이벤트 전송됨`,
       };
     } catch (error) {
-      this.logger.error(`❌ POST /sse/broadcast - 실패: ${error.message}`);
-      throw new BadRequestException(`브로드캐스트 실패: ${error.message}`);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`❌ POST /sse/broadcast - 실패: ${errorMessage}`);
+      throw new BadRequestException(`브로드캐스트 실패: ${errorMessage}`);
     }
   }
 
@@ -143,34 +142,10 @@ export class SseController {
       );
       return result;
     } catch (error) {
-      this.logger.error(
-        `❌ GET /sse/connections - 조회 실패: ${error.message}`,
-      );
-      throw new BadRequestException(`연결 조회 실패: ${error.message}`);
+      const errorMessage =
+        error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`❌ GET /sse/connections - 조회 실패: ${errorMessage}`);
+      throw new BadRequestException(`연결 조회 실패: ${errorMessage}`);
     }
-  }
-
-  /**
-   * 테스트용 SSE 엔드포인트 (1초마다 이벤트 전송)
-   * 개발/테스트용으로 유지
-   *
-   * @returns Observable<MessageEvent>
-   */
-  @Sse('test')
-  test(): Observable<MessageEvent> {
-    return new Observable((observer) => {
-      let count = 0;
-      const interval = setInterval(() => {
-        observer.next({
-          data: {
-            message: `테스트 SSE 이벤트 ${count++}`,
-            timestamp: new Date().toISOString(),
-            type: 'test',
-          },
-        } as MessageEvent);
-      }, 1000);
-
-      return () => clearInterval(interval);
-    });
   }
 }

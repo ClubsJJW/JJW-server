@@ -49,6 +49,7 @@ HELLO_TEXT=Hello from Channel Talk Hackathon!
 ```
 
 **환경변수 설명:**
+
 - `PORT`: 서버 포트 (기본값: 3090)
 - `USE_HTTP2`: HTTP/2 사용 여부 (true/false, 기본값: false)
 - `HELLO_TEXT`: 헬로 메시지 텍스트
@@ -81,6 +82,7 @@ curl http://localhost:3090
 환경변수 `HELLO_TEXT`의 값을 반환합니다.
 
 **Response:**
+
 ```json
 {
   "message": "Hello from Channel Talk Hackathon!"
@@ -88,6 +90,7 @@ curl http://localhost:3090
 ```
 
 **Example:**
+
 ```bash
 curl http://localhost:3090/api/hello
 ```
@@ -97,27 +100,55 @@ curl http://localhost:3090/api/hello
 SSE(Server-Sent Events) 연결 엔드포인트. 클라이언트별 실시간 이벤트를 수신합니다.
 
 **Query Parameters:**
-- `clientId` (optional): 클라이언트 고유 ID
+
+- `memberId` (required): 멤버 고유 ID
 
 **Response:**
 Server-Sent Events 스트림
 
-**Example:**
-```bash
-# 클라이언트 ID 지정
-curl -N http://localhost:3090/sse/connect?clientId=user123
+**주요 기능:**
 
-# 클라이언트 ID 자동 생성
-curl -N http://localhost:3090/sse/connect
+- **Heartbeat**: 60초마다 자동으로 heartbeat 이벤트를 전송하여 SSE 연결이 정상적으로 유지되고 있는지 클라이언트에서 확인할 수 있습니다.
+- 연결이 끊기면 자동으로 재연결을 시도합니다.
+
+**Example:**
+
+```bash
+# 멤버 ID 지정하여 연결
+curl -N 'http://localhost:3090/sse/connect?memberId=member_123'
 ```
 
-### GET /sse/test
+### POST /sse/broadcast
 
-테스트용 SSE 엔드포인트. 1초마다 이벤트를 전송합니다.
+ALF(Application Logic Function)의 요청을 특정 멤버의 클라이언트들에게 전달하는 브로드캐스트 엔드포인트입니다.
+
+**Request Body:**
+
+```json
+{
+  "memberId": "member_123",
+  "eventData": {
+    "url": "/new-page"
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "sentCount": 2,
+  "message": "2개의 연결에 이벤트 전송됨"
+}
+```
 
 **Example:**
+
 ```bash
-curl -N http://localhost:3090/sse/test
+curl -X POST http://localhost:3090/sse/broadcast \
+  -H "Content-Type: application/json" \
+  -d '{"memberId":"member_123","eventData":{"url":"/new-page"}}'
 ```
 
 ### GET /sse/status
@@ -125,15 +156,42 @@ curl -N http://localhost:3090/sse/test
 SSE 연결 상태를 확인하는 엔드포인트.
 
 **Response:**
+
 ```json
 {
-  "connectedClients": 0
+  "activeConnections": 2,
+  "status": "healthy",
+  "timestamp": "2025-11-07T12:00:00.000Z"
 }
 ```
 
 **Example:**
+
 ```bash
 curl http://localhost:3090/sse/status
+```
+
+### GET /sse/connections
+
+특정 멤버의 활성 연결 상태를 조회하는 엔드포인트.
+
+**Query Parameters:**
+
+- `memberId` (required): 멤버 고유 ID
+
+**Response:**
+
+```json
+{
+  "memberId": "member_123",
+  "activeCount": 2,
+  "isConnected": true
+}
+```
+
+**Example:**
+
+```bash
 ```
 
 ## 프로젝트 구조
@@ -156,22 +214,26 @@ src/
 HTTP/2를 활성화하려면:
 
 1. 환경변수 설정:
+
 ```bash
 USE_HTTP2=true
 ```
 
 2. SSL 인증서 생성 (이미 생성되어 있음):
+
 ```bash
 openssl req -x509 -newkey rsa:2048 -nodes -sha256 -subj '/CN=localhost' \
   -keyout certs/localhost-key.pem -out certs/localhost-cert.pem -days 365
 ```
 
 3. 서버 시작:
+
 ```bash
 pnpm run start:dev
 ```
 
 4. HTTPS로 접속:
+
 ```bash
 # -k 옵션은 자체 서명 인증서 허용
 curl -k https://localhost:3090/api/hello

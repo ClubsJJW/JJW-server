@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSE Test - EventSource</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        .status-disconnected {
+            background: #dc3545;
+        }
+
+        .status-connected {
+            background: #28a745;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+            font-size: 14px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-connect {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-connect:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+
+        .btn-disconnect {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-disconnect:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+        }
+
+        .btn-clear {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-clear:hover {
+            background: #5a6268;
+            transform: translateY(-2px);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        .events-section {
+            margin-top: 30px;
+        }
+
+        .events-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .events-header h2 {
+            color: #333;
+            font-size: 20px;
+        }
+
+        .event-count {
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .events-list {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 15px;
+            background: #f8f9fa;
+        }
+
+        .event-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .event-type {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .event-type-redirect {
+            background: #667eea;
+            color: white;
+        }
+
+        .event-type-heartbeat {
+            background: #28a745;
+            color: white;
+        }
+
+        .event-url {
+            font-size: 16px;
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 5px;
+            word-break: break-all;
+        }
+
+        .event-time {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .event-data {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 10px;
+            opacity: 0.3;
+        }
+
+        /* 알림 배너 */
+        .notification-banner {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #28a745;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            display: none;
+            animation: slideInRight 0.3s ease-out;
+            z-index: 1000;
+        }
+
+        @keyframes slideInRight {
+            from {
+                transform: translateX(400px);
+            }
+            to {
+                transform: translateX(0);
+            }
+        }
+
+        .notification-banner.show {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 SSE Test Page</h1>
+        <p class="subtitle">EventSource를 사용한 실시간 이벤트 수신 테스트</p>
+
+        <!-- 연결 상태 -->
+        <div class="status-bar">
+            <div class="status-indicator status-disconnected" id="statusIndicator"></div>
+            <div>
+                <strong>연결 상태:</strong>
+                <span id="statusText">연결 끊김</span>
+            </div>
+        </div>
+
+        <!-- Member ID 입력 -->
+        <div class="control-group">
+            <label for="memberIdInput">Member ID</label>
+            <input 
+                type="text" 
+                id="memberIdInput" 
+                placeholder="Member ID를 입력하세요 (예: abcd)" 
+                value="abcd"
+            >
+        </div>
+
+        <!-- 서버 URL 입력 -->
+        <div class="control-group">
+            <label for="serverUrlInput">Server URL</label>
+            <input 
+                type="text" 
+                id="serverUrlInput" 
+                placeholder="서버 URL을 입력하세요" 
+                value="https://yagu-route.engineer-hama.shop"
+            >
+        </div>
+
+        <!-- 버튼 그룹 -->
+        <div class="button-group">
+            <button class="btn-connect" id="connectBtn" onclick="connect()">
+                🔌 연결하기
+            </button>
+            <button class="btn-disconnect" id="disconnectBtn" onclick="disconnect()" disabled>
+                ❌ 연결 끊기
+            </button>
+            <button class="btn-clear" onclick="clearEvents()">
+                🗑️ 초기화
+            </button>
+        </div>
+
+        <!-- 이벤트 목록 -->
+        <div class="events-section">
+            <div class="events-header">
+                <h2>📨 수신된 이벤트</h2>
+                <span class="event-count" id="eventCount">0</span>
+            </div>
+            <div class="events-list" id="eventsList">
+                <div class="empty-state">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
+                    </svg>
+                    <p>아직 수신된 이벤트가 없습니다</p>
+                    <p style="font-size: 12px; margin-top: 5px;">위의 "연결하기" 버튼을 눌러주세요</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 알림 배너 -->
+    <div class="notification-banner" id="notificationBanner">
+        🎉 새로운 이벤트가 도착했습니다!
+    </div>
+
+    <script>
+        let eventSource = null;
+        let eventCount = 0;
+        const events = [];
+
+        function connect() {
+            const memberId = document.getElementById('memberIdInput').value.trim();
+            const serverUrl = document.getElementById('serverUrlInput').value.trim();
+
+            if (!memberId) {
+                alert('❌ Member ID를 입력해주세요!');
+                return;
+            }
+
+            if (!serverUrl) {
+                alert('❌ Server URL을 입력해주세요!');
+                return;
+            }
+
+            // 기존 연결이 있으면 종료
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            console.log(`🔌 SSE 연결 시도: ${serverUrl}/sse/connect?memberId=${memberId}`);
+
+            // EventSource 생성
+            eventSource = new EventSource(`${serverUrl}/sse/connect?memberId=${memberId}`);
+
+            // 연결 성공
+            eventSource.onopen = (event) => {
+                console.log('✅ SSE 연결 성공', event);
+                updateConnectionStatus(true);
+            };
+
+            // 리다이렉트 이벤트 수신
+            eventSource.addEventListener('redirect', (event) => {
+                console.log('📨 Redirect 이벤트 수신:', event.data);
+                
+                try {
+                    const data = JSON.parse(event.data);
+                    addEvent('redirect', data, event.id);
+                    
+                    // 알림 배너 표시
+                    showNotification('🔀 리다이렉트 이벤트 수신!');
+                    
+                    // 리다이렉트 확인
+                    if (data.url) {
+                        const shouldRedirect = confirm(
+                            `리다이렉트 하시겠습니까?\n\n경로: ${data.url}\n시간: ${data.timestamp}`
+                        );
+                        
+                        if (shouldRedirect) {
+                            window.location.href = data.url;
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ 이벤트 파싱 에러:', error);
+                }
+            });
+
+            // 하트비트 이벤트 수신
+            eventSource.addEventListener('heartbeat', (event) => {
+                console.log('💓 Heartbeat:', event.data);
+                
+                try {
+                    const data = JSON.parse(event.data);
+                    addEvent('heartbeat', data, event.id);
+                } catch (error) {
+                    console.error('❌ 하트비트 파싱 에러:', error);
+                }
+            });
+
+            // 에러 처리
+            eventSource.onerror = (error) => {
+                console.error('❌ SSE 연결 에러:', error);
+                
+                if (eventSource.readyState === EventSource.CLOSED) {
+                    console.log('🔌 SSE 연결이 서버에 의해 종료되었습니다');
+                    updateConnectionStatus(false);
+                } else if (eventSource.readyState === EventSource.CONNECTING) {
+                    console.log('🔄 SSE 재연결 시도 중...');
+                } else {
+                    updateConnectionStatus(false);
+                }
+            };
+
+            // 기본 message 이벤트 (만약 type이 지정되지 않은 경우)
+            eventSource.onmessage = (event) => {
+                console.log('📩 Message 이벤트:', event.data);
+                try {
+                    const data = JSON.parse(event.data);
+                    addEvent('message', data, event.id);
+                } catch (error) {
+                    console.error('❌ 메시지 파싱 에러:', error);
+                }
+            };
+        }
+
+        function disconnect() {
+            if (eventSource) {
+                console.log('🔌 SSE 연결 종료');
+                eventSource.close();
+                eventSource = null;
+                updateConnectionStatus(false);
+            }
+        }
+
+        function updateConnectionStatus(isConnected) {
+            const indicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const connectBtn = document.getElementById('connectBtn');
+            const disconnectBtn = document.getElementById('disconnectBtn');
+
+            if (isConnected) {
+                indicator.className = 'status-indicator status-connected';
+                statusText.textContent = '연결됨';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                indicator.className = 'status-indicator status-disconnected';
+                statusText.textContent = '연결 끊김';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        function addEvent(type, data, eventId) {
+            eventCount++;
+            events.unshift({ type, data, eventId, timestamp: new Date() });
+
+            // 이벤트 카운트 업데이트
+            document.getElementById('eventCount').textContent = eventCount;
+
+            // 이벤트 목록 렌더링
+            renderEvents();
+        }
+
+        function renderEvents() {
+            const eventsList = document.getElementById('eventsList');
+
+            if (events.length === 0) {
+                eventsList.innerHTML = `
+                    <div class="empty-state">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
+                        </svg>
+                        <p>아직 수신된 이벤트가 없습니다</p>
+                    </div>
+                `;
+                return;
+            }
+
+            eventsList.innerHTML = events.map(event => {
+                const typeClass = event.type === 'heartbeat' ? 'event-type-heartbeat' : 'event-type-redirect';
+                const typeEmoji = event.type === 'heartbeat' ? '💓' : '🔀';
+                
+                return `
+                    <div class="event-item">
+                        <div class="event-type ${typeClass}">${typeEmoji} ${event.type.toUpperCase()}</div>
+                        ${event.data.url ? `<div class="event-url">📍 ${event.data.url}</div>` : ''}
+                        <div class="event-time">⏰ ${event.timestamp.toLocaleString('ko-KR')}</div>
+                        ${event.eventId ? `<div class="event-time">🆔 ${event.eventId}</div>` : ''}
+                        <div class="event-data">${JSON.stringify(event.data, null, 2)}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function clearEvents() {
+            if (confirm('모든 이벤트를 초기화하시겠습니까?')) {
+                eventCount = 0;
+                events.length = 0;
+                document.getElementById('eventCount').textContent = '0';
+                renderEvents();
+                console.log('🗑️ 이벤트 목록 초기화');
+            }
+        }
+
+        function showNotification(message) {
+            const banner = document.getElementById('notificationBanner');
+            banner.textContent = message;
+            banner.classList.add('show');
+
+            setTimeout(() => {
+                banner.classList.remove('show');
+            }, 3000);
+        }
+
+        // 페이지 언로드 시 연결 종료
+        window.addEventListener('beforeunload', () => {
+            if (eventSource) {
+                eventSource.close();
+            }
+        });
+
+        // 페이지 로드 시 안내
+        console.log('🎯 SSE Test Page 로드 완료');
+        console.log('📖 사용법:');
+        console.log('1. Member ID 입력 (기본값: abcd)');
+        console.log('2. Server URL 확인 (기본값: https://yagu-route.engineer-hama.shop)');
+        console.log('3. "연결하기" 버튼 클릭');
+        console.log('4. 다른 탭에서 broadcast API 호출하여 테스트');
+        console.log('\n📤 Broadcast 테스트 명령어:');
+        console.log('curl -X POST https://yagu-route.engineer-hama.shop/sse/broadcast \\');
+        console.log('  -H "Content-Type: application/json" \\');
+        console.log('  -d \'{"memberId":"abcd","eventData":{"url":"/test-page"}}\'');
+    </script>
+</body>
+</html>
+
