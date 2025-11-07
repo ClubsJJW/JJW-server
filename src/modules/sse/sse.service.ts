@@ -13,6 +13,7 @@ export interface SseEvent {
 export class SseService implements OnModuleInit, OnModuleDestroy {
   private readonly clients = new Map<string, Subject<SseEvent>>();
   private broadcastInterval: NodeJS.Timeout | null = null;
+  private redirectToggle = false; // 리다이렉트 URL 번갈아 보내기 위한 플래그
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -81,26 +82,29 @@ export class SseService implements OnModuleInit, OnModuleDestroy {
    * 모듈 초기화 시 주기적 브로드캐스트를 시작합니다.
    */
   onModuleInit() {
-    console.log('🔄 SSE 주기적 브로드캐스트 시작 (3초마다)');
+    console.log('🔄 SSE 주기적 리다이렉트 브로드캐스트 시작 (3초마다)');
 
     this.broadcastInterval = setInterval(() => {
       const clientCount = this.getClientCount();
 
       if (clientCount > 0) {
-        const helloText =
-          this.configService.get<string>('HELLO_TEXT') || 'Hello!';
+        // test-1.html과 test-2.html URL을 번갈아 보내기
+        this.redirectToggle = !this.redirectToggle;
+        const redirectUrl = this.redirectToggle
+          ? 'http://localhost:3090/test-1.html'
+          : 'http://localhost:3090/test-2.html';
 
         this.broadcast({
           data: {
-            type: 'hello',
-            message: helloText,
+            type: 'redirect',
+            url: redirectUrl,
             timestamp: new Date().toISOString(),
             connectedClients: clientCount,
           },
         });
 
         console.log(
-          `📤 HELLO_TEXT 브로드캐스트: "${helloText}" → ${clientCount}명의 클라이언트`,
+          `🔄 리다이렉트 브로드캐스트: "${redirectUrl}" → ${clientCount}명의 클라이언트`,
         );
       }
     }, 3000); // 3초마다

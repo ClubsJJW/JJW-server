@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -24,7 +25,7 @@ async function bootstrap() {
     }
   }
 
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     httpsOptions,
   });
 
@@ -33,6 +34,11 @@ async function bootstrap() {
     origin: '*', // 개발 환경용, 프로덕션에서는 특정 도메인으로 제한
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
+  });
+
+  // 정적 파일 서빙 (test-1.html, test-2.html 등)
+  app.useStaticAssets(path.join(__dirname, '..'), {
+    prefix: '/',
   });
 
   await app.listen(port);

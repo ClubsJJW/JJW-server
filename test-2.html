@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>테스트 페이지 2</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        color: white;
+      }
+      .container {
+        text-align: center;
+        padding: 40px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+      }
+      h1 {
+        font-size: 4em;
+        margin: 0 0 20px 0;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+      }
+      .status {
+        font-size: 1.5em;
+        margin: 20px 0;
+        padding: 15px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 10px;
+      }
+      .status.connected {
+        background: rgba(76, 175, 80, 0.3);
+      }
+      .status.disconnected {
+        background: rgba(244, 67, 54, 0.3);
+      }
+      .info {
+        font-size: 1.2em;
+        margin: 10px 0;
+        opacity: 0.9;
+      }
+      .log {
+        margin-top: 30px;
+        max-height: 200px;
+        overflow-y: auto;
+        background: rgba(0, 0, 0, 0.3);
+        padding: 15px;
+        border-radius: 10px;
+        text-align: left;
+        font-family: monospace;
+        font-size: 0.9em;
+      }
+      .log-entry {
+        margin: 5px 0;
+        padding: 5px;
+        border-left: 3px solid #ffd700;
+        padding-left: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🔴 테스트 페이지 2</h1>
+      <div class="info">SSE 리다이렉트 테스트</div>
+      
+      <div id="status" class="status">연결 대기 중...</div>
+      
+      <div class="info">
+        클라이언트 ID: <span id="clientId">-</span>
+      </div>
+
+      <div class="log" id="log">
+        <div class="log-entry">📡 SSE 연결 시작 중...</div>
+      </div>
+    </div>
+
+    <script>
+      let eventSource = null;
+      let clientId = null;
+
+      function log(message) {
+        const logEl = document.getElementById('log');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        const time = new Date().toLocaleTimeString('ko-KR');
+        entry.textContent = `[${time}] ${message}`;
+        logEl.insertBefore(entry, logEl.firstChild);
+        
+        // 최대 20개까지만 표시
+        while (logEl.children.length > 20) {
+          logEl.removeChild(logEl.lastChild);
+        }
+      }
+
+      function updateStatus(text, isConnected) {
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = text;
+        statusEl.className = isConnected ? 'status connected' : 'status disconnected';
+      }
+
+      // SSE 연결
+      clientId = 'test-' + Math.random().toString(36).substr(2, 9);
+      document.getElementById('clientId').textContent = clientId;
+
+      log('🔌 SSE 연결 시도 중...');
+      eventSource = new EventSource(
+        `http://localhost:3090/sse/connect?clientId=${clientId}`,
+      );
+
+      eventSource.onopen = function () {
+        log('✅ SSE 연결 성공!');
+        updateStatus('🟢 연결됨 - 리다이렉트 대기 중...', true);
+      };
+
+      eventSource.onmessage = function (event) {
+        try {
+          const data = JSON.parse(event.data);
+          log(`📨 메시지 수신: ${data.type}`);
+
+          // 리다이렉트 이벤트 처리
+          if (data.type === 'redirect' && data.url) {
+            log(`🔄 리다이렉트 실행: ${data.url}`);
+            updateStatus('🔄 리다이렉트 중...', true);
+            
+            // 0.5초 후 리다이렉트 (로그 확인용)
+            setTimeout(() => {
+              window.location.href = data.url;
+            }, 500);
+          } else {
+            log(`ℹ️ 데이터: ${JSON.stringify(data)}`);
+          }
+        } catch (e) {
+          log(`❌ 파싱 오류: ${e.message}`);
+        }
+      };
+
+      eventSource.onerror = function (error) {
+        log('❌ SSE 연결 오류');
+        updateStatus('🔴 연결 오류', false);
+        console.error('SSE error:', error);
+      };
+
+      // 페이지 종료 시 정리
+      window.addEventListener('beforeunload', () => {
+        if (eventSource) {
+          eventSource.close();
+        }
+      });
+    </script>
+  </body>
+</html>
+
