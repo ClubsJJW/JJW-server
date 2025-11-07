@@ -1,14 +1,18 @@
 import { drizzle } from 'drizzle-orm/mysql2';
 import mysql from 'mysql2/promise';
+import * as dotenv from 'dotenv';
 import * as schema from './schema';
+
+// 환경변수 로드
+dotenv.config();
 
 // MySQL 연결 풀 생성
 const poolConnection = mysql.createPool({
-  host: 'localhost',
-  port: 13306,
-  user: 'jjw_user',
-  password: 'jjw_password',
-  database: 'jjw_db',
+  host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT) || 13306,
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || 'my-secret-pw',
+  database: process.env.DB_NAME || 'jjw_db',
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,

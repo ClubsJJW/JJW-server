@@ -37,8 +37,8 @@ docker compose up -d
 - 이미지: mysql:8.0
 - 포트: 13306 (호스트) → 3306 (컨테이너)
 - 데이터베이스: jjw_db
-- 사용자: jjw_user
-- 비밀번호: jjw_password
+- 사용자: root
+- 비밀번호: my-secret-pw
 
 ### 3. 컨테이너 상태 확인
 
@@ -166,7 +166,7 @@ docker compose down
 docker compose down -v
 
 # MySQL 접속
-docker compose exec mysql mysql -ujjw_user -pjjw_password jjw_db
+docker compose exec mysql mysql -uroot -pmy-secret-pw jjw_db
 
 # 스키마 변경 후 마이그레이션 생성
 pnpm run db:generate
