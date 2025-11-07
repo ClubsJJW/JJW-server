@@ -20,6 +20,14 @@ const poolConnection = mysql.createPool({
   keepAliveInitialDelay: 0,
 });
 
+console.log(
+  process.env.DB_HOST,
+  process.env.DB_PORT,
+  process.env.DB_USER,
+  process.env.DB_PASSWORD,
+  process.env.DB_NAME,
+);
+
 // Drizzle 인스턴스 생성
 export const db = drizzle(poolConnection, { schema, mode: 'default' });
 
@@ -37,4 +45,3 @@ export async function testConnection() {
     return false;
   }
 }
-
