@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { SseModule } from './modules/sse/sse.module';
 
 @Module({
   imports: [
@@ -9,6 +10,7 @@ import { AppService } from './app.service';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    SseModule,
   ],
   controllers: [AppController],
   providers: [AppService],
