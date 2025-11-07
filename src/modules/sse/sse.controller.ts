@@ -7,6 +7,7 @@ import {
   Sse,
   MessageEvent,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { Observable, map } from 'rxjs';
 import { SseService } from './sse.service';
@@ -19,39 +20,9 @@ import type {
 
 @Controller('sse')
 export class SseController {
+  private readonly logger = new Logger(SseController.name);
+
   constructor(private readonly sseService: SseService) {}
-
-  /**
-   * SSE 연결 등록 엔드포인트
-   * 멤버 ID 기반 SSE 연결을 등록합니다.
-   *
-   * @param request SSE 연결 요청 정보 (JSON body)
-   * @returns 연결 성공 응답
-   *
-   * Example: POST /sse/register
-   * {
-   *   "memberId": "member_123"
-   * }
-   */
-  @Post('register')
-  async registerConnection(
-    @Body() request: SseConnectionRequest,
-  ): Promise<{ success: boolean; message: string }> {
-    // 필수 파라미터 검증
-    if (!request.memberId) {
-      throw new BadRequestException('필수 파라미터가 누락되었습니다: memberId');
-    }
-
-    try {
-      await this.sseService.registerConnection(request);
-      return {
-        success: true,
-        message: `SSE 연결 등록 성공: 멤버=${request.memberId}`,
-      };
-    } catch (error) {
-      throw new BadRequestException(`SSE 연결 등록 실패: ${error.message}`);
-    }
-  }
 
   /**
    * SSE 스트리밍 엔드포인트
@@ -66,14 +37,20 @@ export class SseController {
   async connect(
     @Query('memberId') memberId: string,
   ): Promise<Observable<MessageEvent>> {
+    this.logger.log(`📡 GET /sse/connect - memberId: ${memberId}`);
+
     if (!memberId) {
+      this.logger.error('❌ GET /sse/connect - memberId 누락');
       throw new BadRequestException('memberId가 필요합니다');
     }
 
     try {
       // 새로운 연결 등록 및 이벤트 스트림 반환
-      return this.sseService.registerConnection({ memberId });
+      const stream = await this.sseService.registerConnection({ memberId });
+      this.logger.log(`✅ GET /sse/connect - 연결 성공: ${memberId}`);
+      return stream;
     } catch (error) {
+      this.logger.error(`❌ GET /sse/connect - 연결 실패: ${error.message}`);
       throw new BadRequestException(`SSE 연결 실패: ${error.message}`);
     }
   }
@@ -95,7 +72,12 @@ export class SseController {
    */
   @Post('broadcast')
   async broadcast(@Body() request: SseBroadcastRequest) {
+    this.logger.log(
+      `📤 POST /sse/broadcast - memberId: ${request.memberId}, url: ${request.eventData?.url}`,
+    );
+
     if (!request.memberId || !request.eventData?.url) {
+      this.logger.error('❌ POST /sse/broadcast - 필수 파라미터 누락');
       throw new BadRequestException(
         '필수 파라미터가 누락되었습니다: memberId, eventData.url',
       );
@@ -104,12 +86,16 @@ export class SseController {
     try {
       const sentCount =
         await this.sseService.broadcastToMatchingConnections(request);
+      this.logger.log(
+        `✅ POST /sse/broadcast - 성공: ${sentCount}개 연결에 전송 (memberId: ${request.memberId})`,
+      );
       return {
         success: true,
         sentCount,
         message: `${sentCount}개의 연결에 이벤트 전송됨`,
       };
     } catch (error) {
+      this.logger.error(`❌ POST /sse/broadcast - 실패: ${error.message}`);
       throw new BadRequestException(`브로드캐스트 실패: ${error.message}`);
     }
   }
@@ -121,14 +107,18 @@ export class SseController {
    */
   @Get('status')
   getStatus() {
+    this.logger.log('📊 GET /sse/status');
+
     const activeConnections = this.sseService.getClientCount();
 
-    // 추가 통계 정보 조회 (실제 구현 시 DB에서 조회)
-    return {
+    const response = {
       activeConnections,
       status: 'healthy',
       timestamp: new Date().toISOString(),
     };
+
+    this.logger.log(`✅ GET /sse/status - 활성 연결: ${activeConnections}개`);
+    return response;
   }
 
   /**
@@ -139,14 +129,23 @@ export class SseController {
    */
   @Get('connections')
   async getMemberConnections(@Query('memberId') memberId: string) {
+    this.logger.log(`🔍 GET /sse/connections - memberId: ${memberId}`);
+
     if (!memberId) {
+      this.logger.error('❌ GET /sse/connections - memberId 누락');
       throw new BadRequestException('필수 파라미터가 누락되었습니다: memberId');
     }
 
     try {
       const result = await this.sseService.getMemberActiveConnections(memberId);
+      this.logger.log(
+        `✅ GET /sse/connections - 조회 성공: ${result.activeCount}개 연결 (memberId: ${memberId})`,
+      );
       return result;
     } catch (error) {
+      this.logger.error(
+        `❌ GET /sse/connections - 조회 실패: ${error.message}`,
+      );
       throw new BadRequestException(`연결 조회 실패: ${error.message}`);
     }
   }
