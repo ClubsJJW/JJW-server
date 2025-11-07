@@ -1,12 +1,16 @@
 import { Injectable, Inject } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { eq } from 'drizzle-orm';
 import type { DrizzleDB } from '@/db/connection';
 import { mockUsers } from '@/db/schema';
-import { LoginDto, LoginResponseDto } from './dto/login.dto';
+import { LoginDto, LoginResponseDto, JwtPayload } from './dto/login.dto';
 
 @Injectable()
 export class UserService {
-  constructor(@Inject('DB') private db: DrizzleDB) {}
+  constructor(
+    @Inject('DB') private db: DrizzleDB,
+    private jwtService: JwtService,
+  ) {}
 
   /**
    * 사용자 로그인
@@ -36,12 +40,17 @@ export class UserService {
         userId = Number(insertResult[0].insertId);
         console.log(`✨ 신규 사용자 생성: ${nickname} (userId: ${userId})`);
 
+        // JWT 토큰 생성
+        const payload: JwtPayload = { userId, nickname };
+        const token = this.jwtService.sign(payload);
+
         return {
           success: true,
           message: '신규 사용자 생성 및 로그인 성공',
           data: {
             userId,
             nickname,
+            token,
           },
         };
       }
@@ -59,12 +68,17 @@ export class UserService {
       userId = user[0].id;
       console.log(`👤 기존 사용자 로그인: ${nickname} (userId: ${userId})`);
 
+      // JWT 토큰 생성
+      const payload: JwtPayload = { userId, nickname };
+      const token = this.jwtService.sign(payload);
+
       return {
         success: true,
         message: '로그인 성공',
         data: {
           userId,
           nickname,
+          token,
         },
       };
     } catch (error) {

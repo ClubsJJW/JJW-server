@@ -7,7 +7,13 @@ export class LoginResponseDto {
   success: boolean;
   message: string;
   data?: {
-    userId: number; // mock_users 테이블의 id
+    userId: number;     // mock_users 테이블의 id
     nickname: string;
+    token: string;      // JWT 토큰
   };
+}
+
+export class JwtPayload {
+  userId: number;
+  nickname: string;
 }
