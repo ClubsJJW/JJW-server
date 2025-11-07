@@ -8,8 +8,10 @@ async function bootstrap() {
   const useHttp2 = process.env.USE_HTTP2 === 'true';
   const port = process.env.PORT ?? 3090;
 
-  let httpsOptions: { key: Buffer; cert: Buffer; allowHTTP1: boolean } | undefined = undefined;
-  
+  let httpsOptions:
+    | { key: Buffer; cert: Buffer; allowHTTP1: boolean }
+    | undefined = undefined;
+
   if (useHttp2) {
     const certPath = path.join(__dirname, '..', 'certs', 'localhost-cert.pem');
     const keyPath = path.join(__dirname, '..', 'certs', 'localhost-key.pem');

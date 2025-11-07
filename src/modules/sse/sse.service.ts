@@ -7,8 +7,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Observable, Subject } from 'rxjs';
-import { eq, and, gt } from 'drizzle-orm';
-import { sseConnections, sseEvents } from '../../db/schema';
+import {
+  sseEvents,
+  broadcastRequests,
+  broadcastResults,
+} from '../../db/schema';
 
 export interface SseEvent {
   data: any;
@@ -21,37 +24,30 @@ export interface SseEvent {
  * SSE 연결 등록을 위한 요청 DTO
  */
 export interface SseConnectionRequest {
-  channelId: string; // 채널 고유값
-  userChatId: string; // 상담 대화 단위 ID
-  userId?: string; // 고객 기본 키 (nullable - 로그인하지 않은 사용자 허용)
-  clientConnectionId: string; // SSE 연결 고유 토큰
-  memberId?: string; // 회원 고객 키 (선택적)
-  memberHash?: string; // 멤버 인증 해시 (선택적)
-  mediumType?: string; // 유입 매체 구분 (web, ios, android 등)
-  mediumKey?: string; // 매체 세부 식별자
-  sessionId?: string; // 세션 범위 내 재연결 식별
-  metadata?: Record<string, any>; // 추가 메타데이터
+  memberId: string; // 멤버 고유 ID
 }
+
+/**
+ * SSE 브로드캐스트 데이터 타입 정의
+ */
+export type SseBroadcastDataType = {
+  url: string; // 필수: 리다이렉트 경로 (메인 URL 제외한 path, 예: "/new-page")
+};
 
 /**
  * SSE 이벤트 전송을 위한 요청 DTO
  */
 export interface SseBroadcastRequest {
-  channelId: string; // 대상 채널 ID
-  userChatId: string; // 대상 상담 ID
-  mediumKey?: string; // 대상 매체 키 (지정하지 않으면 모든 매체에 전송)
-  eventType: string; // 이벤트 타입 ('message', 'redirect', 'status' 등)
-  eventData: any; // 이벤트 데이터
-  excludeConnectionId?: string; // 제외할 연결 ID (본인 제외 등)
+  memberId: string; // 대상 멤버 ID
+  eventData: SseBroadcastDataType; // 이벤트 데이터
 }
-
-export interface SseConnectionStream extends Observable<SseEvent> {}
 
 @Injectable()
 export class SseService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SseService.name);
-  private readonly clients = new Map<string, Subject<SseEvent>>();
-  private cleanupInterval: NodeJS.Timeout | null = null;
+  // memberId를 키로 Subject 배열 관리 (한 멤버가 여러 연결 가능)
+  private readonly clients = new Map<string, Subject<SseEvent>[]>();
+  private heartbeatInterval: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly configService: ConfigService,
@@ -67,52 +63,17 @@ export class SseService implements OnModuleInit, OnModuleDestroy {
   async registerConnection(
     request: SseConnectionRequest,
   ): Promise<Observable<SseEvent>> {
-    const {
-      channelId,
-      userChatId,
-      userId,
-      clientConnectionId,
-      memberId,
-      memberHash,
-      mediumType = 'web',
-      mediumKey,
-      sessionId,
-      metadata,
-    } = request;
-
-    // TTL 설정 (기본 1시간)
-    const ttlMinutes = parseInt(
-      this.configService.get('SSE_TTL_MINUTES', '60'),
-    );
-    const ttlExpiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
+    const { memberId } = request;
 
     try {
-      // 1. 기존 연결 정리 (동일 clientConnectionId가 있으면 제거)
-      await this.db
-        .delete(sseConnections)
-        .where(eq(sseConnections.clientConnectionId, clientConnectionId));
-
-      // 2. 새 연결 정보 저장
-      await this.db.insert(sseConnections).values({
-        channelId,
-        userChatId,
-        userId,
-        clientConnectionId,
-        memberId,
-        memberHash,
-        mediumType,
-        mediumKey,
-        sessionId,
-        ttlExpiresAt,
-        metadata: metadata ? JSON.stringify(metadata) : null,
-      });
-
-      // 3. 메모리 연결 설정
+      // 메모리 연결 설정 - memberId에 Subject 추가
       const subject = new Subject<SseEvent>();
-      this.clients.set(clientConnectionId, subject);
+      const existingSubjects = this.clients.get(memberId) || [];
+      existingSubjects.push(subject);
+      this.clients.set(memberId, existingSubjects);
 
       this.logger.log(
-        `✅ SSE 연결 등록: ${clientConnectionId} (채널: ${channelId}, 상담: ${userChatId})`,
+        `✅ SSE 연결 등록: 멤버=${memberId} (현재 연결 수: ${existingSubjects.length})`,
       );
 
       return new Observable((observer) => {
@@ -121,8 +82,24 @@ export class SseService implements OnModuleInit, OnModuleDestroy {
         // 클라이언트 연결 해제 시 정리
         return () => {
           subscription.unsubscribe();
-          this.clients.delete(clientConnectionId);
-          this.logger.log(`❌ SSE 연결 해제: ${clientConnectionId}`);
+
+          // 해당 subject를 배열에서 제거
+          const subjects = this.clients.get(memberId);
+          if (subjects) {
+            const index = subjects.indexOf(subject);
+            if (index > -1) {
+              subjects.splice(index, 1);
+            }
+
+            // 배열이 비면 Map에서 제거
+            if (subjects.length === 0) {
+              this.clients.delete(memberId);
+            } else {
+              this.clients.set(memberId, subjects);
+            }
+          }
+
+          this.logger.log(`❌ SSE 연결 해제: 멤버=${memberId}`);
         };
       });
     } catch (error) {
@@ -137,150 +114,86 @@ export class SseService implements OnModuleInit, OnModuleDestroy {
    * @param request 브로드캐스트 요청 정보
    * @returns 전송된 연결 수
    */
-  /**
-   * 특정 연결 ID에 대한 이벤트 스트림을 가져옵니다
-   */
-  getConnectionStream(clientConnectionId: string): Observable<SseEvent> {
-    const subject = this.clients.get(clientConnectionId);
-    if (!subject) {
-      throw new Error(`연결을 찾을 수 없습니다: ${clientConnectionId}`);
-    }
-    return subject.asObservable();
-  }
 
   async broadcastToMatchingConnections(
     request: SseBroadcastRequest,
   ): Promise<number> {
-    const {
-      channelId,
-      userChatId,
-      mediumKey,
-      eventType,
-      eventData,
-      excludeConnectionId,
-    } = request;
+    const { memberId, eventData } = request;
 
     try {
-      const now = new Date();
+      // 1. 브로드캐스트 요청 저장
+      await this.db.insert(broadcastRequests).values({
+        memberId,
+        eventData: JSON.stringify(eventData),
+      });
 
-      // 1. 매칭되는 활성 연결들 조회
-      let query = this.db
-        .select({
-          clientConnectionId: sseConnections.clientConnectionId,
-          memberId: sseConnections.memberId,
-          memberHash: sseConnections.memberHash,
-          mediumKey: sseConnections.mediumKey,
-        })
-        .from(sseConnections)
-        .where(
-          and(
-            eq(sseConnections.channelId, channelId),
-            eq(sseConnections.userChatId, userChatId),
-            gt(sseConnections.ttlExpiresAt, now), // TTL 유효한 연결만
-          ),
-        );
+      this.logger.log(`📝 브로드캐스트 요청 저장: 멤버=${memberId}`);
 
-      // mediumKey가 지정된 경우 필터링
-      if (mediumKey) {
-        query = query.where(eq(sseConnections.mediumKey, mediumKey));
-      }
+      // 2. 메모리에서 해당 멤버의 모든 연결 가져오기
+      const subjects = this.clients.get(memberId);
 
-      const matchingConnections = (await query) as Array<{
-        clientConnectionId: string;
-        memberId: string | null;
-        memberHash: string | null;
-        mediumKey: string | null;
-      }>;
-
-      if (matchingConnections.length === 0) {
-        this.logger.debug(
-          `매칭되는 SSE 연결 없음: 채널=${channelId}, 상담=${userChatId}, 매체=${mediumKey || 'all'}`,
-        );
+      if (!subjects || subjects.length === 0) {
+        this.logger.debug(`매칭되는 SSE 연결 없음: 멤버=${memberId}`);
         return 0;
       }
 
-      // 2. 멤버 인증 검증 (memberId가 있는 경우)
-      const hasMemberAuth = matchingConnections.some(
-        (conn) => conn.memberId && conn.memberHash,
-      );
-      let validConnections = matchingConnections;
-
-      if (hasMemberAuth) {
-        // 멤버 인증이 필요한 경우, 해시 검증 통과한 연결만 허용
-        validConnections = matchingConnections.filter((conn) => {
-          if (!conn.memberId || !conn.memberHash) return false;
-          // TODO: 실제 멤버 해시 검증 로직 구현 (외부 서비스 호출 등)
-          return true; // 임시로 모두 통과
-        });
-      }
-
-      // 3. 제외할 연결 제거
-      if (excludeConnectionId) {
-        validConnections = validConnections.filter(
-          (conn) => conn.clientConnectionId !== excludeConnectionId,
-        );
-      }
-
-      if (validConnections.length === 0) {
-        this.logger.debug('유효한 SSE 연결 없음 (인증/제외 필터링 후)');
-        return 0;
-      }
-
-      // 4. 이벤트 전송 및 로깅
+      // 3. 이벤트 전송
       const event: SseEvent = {
         data: {
-          type: eventType,
           ...eventData,
           timestamp: new Date().toISOString(),
-          channelId,
-          userChatId,
+          memberId,
         },
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        type: eventType,
+        type: 'redirect',
       };
 
       let successCount = 0;
 
-      for (const connection of validConnections) {
-        const client = this.clients.get(connection.clientConnectionId);
-        if (client) {
-          client.next(event);
+      // 모든 연결에 이벤트 전송
+      for (const subject of subjects) {
+        try {
+          subject.next(event);
           successCount++;
 
-          // 이벤트 로그 저장
+          // 성공 이벤트 로그 저장
           await this.db.insert(sseEvents).values({
-            clientConnectionId: connection.clientConnectionId,
-            eventType,
+            memberId,
+            eventType: 'redirect',
             eventData: JSON.stringify(eventData),
-            userChatId,
-            channelId,
             delivered: 1,
           });
-        } else {
-          // 메모리에 없는 연결은 DB에서 정리
-          await this.db
-            .delete(sseConnections)
-            .where(
-              eq(
-                sseConnections.clientConnectionId,
-                connection.clientConnectionId,
-              ),
-            );
+
+          // 브로드캐스트 결과 저장
+          await this.db.insert(broadcastResults).values({
+            memberId,
+            eventData: JSON.stringify(eventData),
+            success: 1,
+          });
+        } catch (error) {
+          this.logger.error(
+            `이벤트 전송 실패: 멤버=${memberId}, 에러=${error.message}`,
+          );
 
           // 실패 이벤트 로그 저장
           await this.db.insert(sseEvents).values({
-            clientConnectionId: connection.clientConnectionId,
-            eventType,
+            memberId,
+            eventType: 'redirect',
             eventData: JSON.stringify(eventData),
-            userChatId,
-            channelId,
             delivered: 0,
+          });
+
+          // 브로드캐스트 결과 저장
+          await this.db.insert(broadcastResults).values({
+            memberId,
+            eventData: JSON.stringify(eventData),
+            success: 0,
           });
         }
       }
 
       this.logger.log(
-        `📤 SSE 브로드캐스트: ${successCount}/${validConnections.length} 연결 성공 (채널: ${channelId}, 상담: ${userChatId})`,
+        `📤 SSE 브로드캐스트: ${successCount}/${subjects.length} 연결 성공 (멤버: ${memberId})`,
       );
 
       return successCount;
@@ -295,8 +208,10 @@ export class SseService implements OnModuleInit, OnModuleDestroy {
    * @param event 전송할 이벤트
    */
   broadcast(event: SseEvent): void {
-    this.clients.forEach((client) => {
-      client.next(event);
+    this.clients.forEach((subjects) => {
+      subjects.forEach((subject) => {
+        subject.next(event);
+      });
     });
   }
 
@@ -304,128 +219,112 @@ export class SseService implements OnModuleInit, OnModuleDestroy {
    * 연결된 클라이언트 수를 반환합니다.
    */
   getClientCount(): number {
-    return this.clients.size;
+    let totalCount = 0;
+    this.clients.forEach((subjects) => {
+      totalCount += subjects.length;
+    });
+    return totalCount;
   }
 
   /**
-   * 특정 클라이언트가 연결되어 있는지 확인합니다.
+   * 특정 멤버가 연결되어 있는지 확인합니다.
    */
-  isClientConnected(clientConnectionId: string): boolean {
-    return this.clients.has(clientConnectionId);
+  isMemberConnected(memberId: string): boolean {
+    const subjects = this.clients.get(memberId);
+    return subjects !== undefined && subjects.length > 0;
   }
 
   /**
-   * 특정 연결 정보를 조회합니다.
+   * 특정 멤버의 활성 연결들을 조회합니다 (메모리 기반).
    */
-  async getConnectionInfo(clientConnectionId: string) {
-    const result = (await this.db
-      .select()
-      .from(sseConnections)
-      .where(eq(sseConnections.clientConnectionId, clientConnectionId))
-      .limit(1)) as Promise<Array<typeof sseConnections.$inferSelect>>;
+  async getMemberActiveConnections(memberId: string) {
+    // 메모리에서 실제 연결 수 확인
+    const subjects = this.clients.get(memberId);
+    const activeCount = subjects ? subjects.length : 0;
 
-    return result[0] || null;
+    return {
+      memberId,
+      activeCount,
+      isConnected: activeCount > 0,
+    };
   }
 
   /**
-   * 특정 사용자의 활성 연결들을 조회합니다.
+   * 모든 활성 연결에 heartbeat 이벤트를 전송합니다.
    */
-  async getUserActiveConnections(userId: string, channelId: string) {
-    const now = new Date();
-
-    return (await this.db
-      .select({
-        clientConnectionId: sseConnections.clientConnectionId,
-        userChatId: sseConnections.userChatId,
-        mediumType: sseConnections.mediumType,
-        mediumKey: sseConnections.mediumKey,
-        connectedAt: sseConnections.connectedAt,
-      })
-      .from(sseConnections)
-      .where(
-        and(
-          eq(sseConnections.userId, userId),
-          eq(sseConnections.channelId, channelId),
-          gt(sseConnections.ttlExpiresAt, now),
-        ),
-      )) as Promise<
-      Array<{
-        clientConnectionId: string;
-        userChatId: string;
-        mediumType: string | null;
-        mediumKey: string | null;
-        connectedAt: Date;
-      }>
-    >;
-  }
-
-  /**
-   * 만료된 연결들을 정리합니다.
-   */
-  async cleanupExpiredConnections(): Promise<number> {
-    const now = new Date();
-
+  async sendHeartbeatToAllConnections(): Promise<number> {
     try {
-      const expiredConnections = await (this.db
-        .select({ clientConnectionId: sseConnections.clientConnectionId })
-        .from(sseConnections)
-        .where(gt(sseConnections.ttlExpiresAt, now)) as Promise<
-        Array<{
-          clientConnectionId: string;
-        }>
-      >);
+      const now = new Date();
 
-      if (expiredConnections.length > 0) {
-        // 메모리에서 제거
-        expiredConnections.forEach(({ clientConnectionId }) => {
-          this.clients.delete(clientConnectionId);
-        });
+      // 메모리에서 모든 활성 연결 가져오기
+      let totalConnections = 0;
+      this.clients.forEach((subjects) => {
+        totalConnections += subjects.length;
+      });
 
-        // DB에서 제거
-        const result = await this.db
-          .delete(sseConnections)
-          .where(gt(sseConnections.ttlExpiresAt, now));
-
-        this.logger.log(
-          `🧹 만료된 SSE 연결 정리: ${expiredConnections.length}개`,
-        );
-        return expiredConnections.length;
+      if (totalConnections === 0) {
+        return 0;
       }
 
-      return 0;
+      // heartbeat 이벤트 생성
+      const heartbeatEvent: SseEvent = {
+        data: {
+          url: '/heartbeat',
+          type: 'heartbeat',
+          message: 'Connection is alive',
+          timestamp: now.toISOString(),
+          activeConnections: totalConnections,
+        },
+        id: `heartbeat-${Date.now()}`,
+        type: 'heartbeat',
+      };
+
+      let sentCount = 0;
+
+      // 모든 활성 연결에 heartbeat 전송
+      this.clients.forEach((subjects) => {
+        subjects.forEach((subject) => {
+          try {
+            subject.next(heartbeatEvent);
+            sentCount++;
+          } catch (error) {
+            this.logger.error(`Heartbeat 전송 에러: ${error.message}`);
+          }
+        });
+      });
+
+      if (sentCount > 0) {
+        this.logger.debug(
+          `💓 Heartbeat 전송: ${sentCount}/${totalConnections}개 연결`,
+        );
+      }
+
+      return sentCount;
     } catch (error) {
-      this.logger.error(`만료 연결 정리 실패: ${error.message}`, error.stack);
+      this.logger.error(`Heartbeat 전송 실패: ${error.message}`, error.stack);
       return 0;
     }
   }
 
   /**
-   * 모듈 초기화 시 정기 정리 작업을 시작합니다.
+   * 모듈 초기화 시 정기 정리 및 heartbeat 작업을 시작합니다.
    */
   onModuleInit() {
-    this.logger.log('🔄 SSE 만료 연결 정기 정리 시작 (5분마다)');
+    this.logger.log('💓 SSE heartbeat 시작 (5초마다)');
 
-    // 5분마다 만료된 연결 정리
-    this.cleanupInterval = setInterval(
-      async () => {
-        await this.cleanupExpiredConnections();
-      },
-      5 * 60 * 1000,
-    ); // 5분
-
-    // 초기 정리 실행
-    setTimeout(() => {
-      this.cleanupExpiredConnections();
-    }, 10000); // 10초 후 시작
+    // 5초마다 모든 활성 연결에 heartbeat 전송
+    this.heartbeatInterval = setInterval(async () => {
+      await this.sendHeartbeatToAllConnections();
+    }, 5 * 1000); // 5초
   }
 
   /**
    * 모듈 종료 시 정리 작업을 중지합니다.
    */
   onModuleDestroy() {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.logger.log('🛑 SSE 정리 작업 중지');
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.logger.log('🛑 SSE heartbeat 중지');
     }
   }
 }
